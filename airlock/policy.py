@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Iterable
-from urllib.parse import urlparse
 import ipaddress
 import os
 import re
+from collections.abc import Iterable
+from dataclasses import dataclass, field
+from pathlib import Path
+from urllib.parse import urlparse
 
 
 @dataclass
@@ -29,7 +29,7 @@ class Policy:
     deny_private_ips: bool = True
 
     @staticmethod
-    def from_dict(data: dict) -> "Policy":
+    def from_dict(data: dict) -> Policy:
         net = data.get("network", {})
         fs = data.get("filesystem", {})
         cmds = data.get("commands", {})
@@ -61,7 +61,7 @@ class Policy:
             return False, "host not in allowlist"
         try:
             addr = ipaddress.ip_address(host)
-            if self.deny_private_ips and (addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved):
+            if self.deny_private_ips and (addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved or addr.is_unspecified):
                 return False, "private/reserved IP destinations are blocked"
         except ValueError:
             pass
