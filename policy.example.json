@@ -1,0 +1,21 @@
+{
+  "network": {
+    "enabled": false,
+    "allowed_hosts": [],
+    "deny_private_ips": true
+  },
+  "filesystem": {
+    "read": ["./workspace"],
+    "write": ["./workspace/output"]
+  },
+  "commands": {
+    "allowed": []
+  },
+  "limits": {
+    "max_tool_calls_per_minute": 30,
+    "max_output_bytes": 1000000,
+    "max_command_seconds": 10,
+    "max_network_seconds": 10,
+    "max_file_bytes": 1000000
+  }
+}
