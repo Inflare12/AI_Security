@@ -48,6 +48,9 @@ The model is not given the containment controller as a normal capability.
 - stdout/stderr capture
 - process registration with the containment controller
 - Unix process-group isolation
+- Windows Job Object process-tree isolation
+
+Windows Job Objects allow a group of processes to be managed as a unit, including terminating the associated process tree. The supervisor uses a private unnamed Job Object for each Windows AI process. 
 
 This is the preferred launch path when the AI must be supervised by Airlock.
 
@@ -178,7 +181,7 @@ Security checks used by CI:
 ```bash
 python -m pip check
 ruff check airlock shield tests
-pip-audit
+pip-audit --skip-editable
 ```
 
 ## Policy
@@ -257,6 +260,8 @@ supervisor = AISupervisor(containment)
 pid = supervisor.start(["/absolute/path/to/your/model-runner"])
 ```
 
+On Windows, the supervisor also places the process into a private Job Object so the process tree can be terminated as a unit. On Unix-like systems it starts a new process group and containment can terminate the group.
+
 For high-risk deployment, put the supervised process inside Docker/VM isolation as well. The supervisor is process control, not a replacement for a kernel boundary.
 
 ## Watchdog
@@ -333,19 +338,22 @@ Do not expose a development instance with `AI_SHIELD_API_KEY` unset to the publi
 8. Verify the policy digest before startup.
 9. Require independent approval for high-impact actions.
 10. Test the actual deployment, not only the Python library.
-11. Have a documented incident process for containment, credential revocation, network isolation, evidence preservation and recovery.
+11. On Windows, validate the Job Object behavior under the exact account and parent-process environment used in production.
+12. Have a documented incident process for containment, credential revocation, network isolation, evidence preservation and recovery.
 
 ## Testing and CI
 
-CI tests Python 3.10–3.13 and performs:
+CI tests the Linux build on Python 3.10–3.13 and runs a Windows Python 3.12 smoke suite. The Linux jobs perform:
 
 - package installation
 - dependency consistency checks
 - Python compilation
 - Ruff static checks
-- dependency vulnerability auditing with `pip-audit`
+- dependency vulnerability auditing with `pip-audit --skip-editable`
 - unit/security tests
 - coverage reporting
+
+The Windows smoke job performs package installation, dependency checks, compilation and the complete pytest suite, including supervised-process termination.
 
 GitHub Actions is configured with read-only repository contents permissions. For stronger supply-chain controls, repository administrators should also require full-SHA pinning for third-party Actions and review workflow changes.
 
@@ -357,9 +365,9 @@ See [`SECURITY.md`](SECURITY.md) for vulnerability reporting and deployment secu
 
 ## Status
 
-**Version 1.1.1 development.** The repository contains the Airlock capability layer, runtime monitor, containment controller, supervised launcher, watchdog, policy integrity checks, tamper-evident audit log, Shield gateway, Docker sandbox and automated CI/security checks.
+**Version 1.1.1 development.** The repository contains the Airlock capability layer, runtime monitor, containment controller, supervised launcher, Windows Job Object isolation, watchdog, policy integrity checks, tamper-evident audit log, Shield gateway, Docker sandbox and automated Linux/Windows CI security checks.
 
-Security is defense-in-depth. The remaining work for any real deployment is environment-specific validation, OS/container hardening, credential isolation and independent operational review.
+Security is defense-in-depth. A passing CI suite means the tested code paths currently pass the automated gates; it does not mathematically prove the absence of every possible bug or deployment-specific vulnerability.
 
 ## License
 
