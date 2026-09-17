@@ -2,7 +2,15 @@ from pathlib import Path
 
 import pytest
 
-from airlock import Airlock, AuditLog, ContainmentController, KillSwitch, Policy, RuntimeMonitor, SecurityViolation
+from airlock import (
+    Airlock,
+    AuditLog,
+    ContainmentController,
+    KillSwitch,
+    Policy,
+    RuntimeMonitor,
+    SecurityViolation,
+)
 
 
 def policy(tmp_path: Path) -> Policy:
