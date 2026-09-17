@@ -2,60 +2,55 @@
 
 A defensive, local-first security layer for people running their own AI models and agents.
 
-**Core idea:** never rely on the model to keep itself safe. Put a security boundary around it: deny capabilities by default, isolate the runtime, monitor behavior, and have an emergency containment path that can stop the model before it can keep acting.
+**Core idea:** never rely on the model to keep itself safe. Put a security boundary around it: deny capabilities by default, isolate the runtime, monitor behavior, and keep an independent emergency containment path.
 
-> **Important:** this is a security control layer, not a guarantee of perfect safety. For production, run untrusted AI inside a hardened container/VM and keep security policy and the kill switch outside anything the model can write.
+> **Important:** this is a security control layer, not a guarantee of perfect safety. For production, run untrusted AI inside a hardened container/VM and keep security policy, credentials and the kill switch outside anything the model can write.
 
 ## What is included
 
-### 1. Airlock — capability firewall
-
-Airlock is an in-process policy/tool broker:
+### Airlock — capability firewall
 
 - network disabled by default
-- exact HTTPS host allowlist when network is enabled
-- private/reserved IP blocking for basic SSRF defense
-- read/write filesystem allowlists with path containment
-- executable allowlist with shell metacharacter rejection
-- command, network and file size/time limits
+- exact HTTPS host allowlist
+- private/reserved IP checks and DNS destination checks
+- no ambient HTTP proxy use and no redirects in brokered requests
+- filesystem read/write allowlists with path containment
+- executable allowlist with shell-metacharacter rejection
+- tool-call, command, network and file limits
 - secret redaction in logs and brokered writes
 - structured JSONL audit trail
 - fail-closed kill switch
 
-### 2. Runtime Monitor — circuit breaker
+### Runtime Monitor — circuit breaker
 
 Repeated policy violations can automatically trip the security boundary. The default example is **8 violations in 60 seconds**. When tripped, the monitor engages the kill switch and the containment controller terminates registered AI processes.
 
-This is deliberately independent of the model's own reasoning.
+### Containment Controller — emergency stop
 
-### 3. Containment Controller — emergency stop
-
-The controller can:
-
-- engage the kill switch
+- engage kill switch
 - terminate registered model/agent process trees
 - preserve an audit trail
-- optionally request a full host OS shutdown
+- optional full host OS shutdown
 
-**Host shutdown is disabled by default** and requires explicit operator configuration. It is a last-resort response, not something an AI model should be given as a tool.
+**Host shutdown is disabled by default** and must be explicitly enabled by an operator. It is a last-resort incident response action, never a normal AI capability.
 
-### 4. Shield — API defense gateway
+### Shield — API defense gateway
 
-Shield provides an application-facing boundary with:
-
-- API-key authentication option
-- per-client rate limiting
-- request-size limits
+- optional API-key authentication
+- per-client IP rate limiting without trusting spoofable client identity headers
+- request and response-size limits
 - suspicious-request indicators
-- a fixed-upstream proxy (the client cannot choose the destination)
+- fixed operator-configured HTTPS upstream
+- no client-controlled destination
+- no redirects or ambient HTTP proxy use
 - response secret redaction
 - health endpoint
 
-Shield is designed to sit in front of an AI API. It is not an open proxy and is not a universal firewall for the internet.
+Shield is an API boundary, not a universal firewall for the internet.
 
-### 5. Sandbox
+### Sandbox
 
-The included Docker configuration demonstrates the intended production boundary:
+The included Docker configuration demonstrates a strong default runtime boundary:
 
 - `network_mode: none`
 - dropped Linux capabilities
@@ -64,7 +59,7 @@ The included Docker configuration demonstrates the intended production boundary:
 - limited memory/CPU/process count
 - only required directories mounted
 
-For high-sensitivity deployments, use a stronger isolation boundary such as a hardened container runtime or VM.
+For high-sensitivity deployments, use a hardened container runtime or VM in addition to Airlock.
 
 ## Architecture
 
@@ -85,7 +80,7 @@ For high-sensitivity deployments, use a stronger isolation boundary such as a ha
                     +---------------------------+
                     |   SANDBOX / TOOL BROKER    |
                     | no host secrets            |
-                    | restricted filesystem     |
+                    | restricted filesystem      |
                     | restricted network        |
                     +-------------+-------------+
                                   |
@@ -108,9 +103,9 @@ For high-sensitivity deployments, use a stronger isolation boundary such as a ha
 
 PUBLIC API PATH
 
-Client --> Shield --> fixed AI upstream
+Client --> Shield --> one fixed AI upstream
             |
-            +--> auth / rate / size / abuse checks / audit
+            +--> auth / rate / size / abuse checks
 ```
 
 ## Quick start
@@ -120,7 +115,7 @@ Client --> Shield --> fixed AI upstream
 ```bash
 python -m venv .venv
 # Windows PowerShell
-.\.venv\Scripts\Activate.ps1
+.\\.venv\\Scripts\\Activate.ps1
 # Linux/macOS
 # source .venv/bin/activate
 
@@ -139,7 +134,7 @@ python -m airlock.demo
 pytest -q
 ```
 
-CI runs the same regression suite on pushes and pull requests.
+The GitHub Actions workflow tests Python 3.10–3.13, installs the package itself, compiles the security modules and produces coverage artifacts. GitHub recommends explicitly setting up the Python version and installing project dependencies in CI. citeturn0search0
 
 ## Using Airlock
 
@@ -160,12 +155,10 @@ policy = Policy.from_dict({
 })
 
 airlock = Airlock(policy, AuditLog("audit.jsonl"))
-
-# The model should request capabilities through your application/tool adapter.
 text = airlock.read_file("./workspace/input.txt")
 ```
 
-Use `policy.example.json` as the starting point for your own policy.
+Use `policy.example.json` as the starting point. Keep the policy outside model-writable directories.
 
 ## Emergency stop
 
@@ -184,7 +177,7 @@ After investigation, an operator can explicitly release it:
 kill.release()
 ```
 
-Once engaged, Airlock refuses brokered actions.
+While engaged, Airlock refuses brokered actions.
 
 ### Automatic containment
 
@@ -195,10 +188,7 @@ kill = KillSwitch("/secure/operator/AI_SECURITY_KILL")
 containment = ContainmentController(kill, AuditLog("audit.jsonl"))
 monitor = RuntimeMonitor(containment, violation_threshold=8, window_seconds=60)
 
-# Register the model process after you launch it.
-containment.register_pid(model_process.pid)
-
-# Feed security violations into the monitor.
+containment.register_pid(model_process.pid, name="my-model")
 monitor.violation("attempted access outside policy")
 ```
 
@@ -223,7 +213,7 @@ The shutdown method is intentionally not part of `Airlock` and should never be e
 
 ## Shield gateway
 
-Start it locally:
+Start locally:
 
 ```bash
 uvicorn shield.gateway:app --host 127.0.0.1 --port 8787
@@ -247,23 +237,32 @@ For a protected upstream, configure a **single fixed HTTPS destination**:
 
 ```text
 AI_SHIELD_UPSTREAM_URL=https://your-ai-api.example/v1/chat/completions
-AI_SHIELD_API_KEY=replace-with-a-long-random-key
+AI_SHIELD_API_KEY=use-a-long-random-secret
 AI_SHIELD_REQUESTS_PER_MINUTE=60
 AI_SHIELD_MAX_REQUEST_BYTES=2000000
+AI_SHIELD_MAX_RESPONSE_BYTES=4000000
 ```
 
-Then clients use `/v1/proxy`. They cannot provide an arbitrary destination URL, which prevents this endpoint from becoming an open proxy.
+Then clients use `/v1/proxy`. They cannot provide an arbitrary destination URL, so this endpoint is not an open proxy.
+
+If `AI_SHIELD_API_KEY` is unset, authentication is intentionally disabled for local development. Do not expose that configuration publicly.
+
+## Sandbox deployment
+
+Start from the included `sandbox/docker-compose.yml` and replace the placeholder model command with your runner. The model should not receive the Docker socket, host credentials, unrestricted filesystem mounts or a network interface.
+
+If the model genuinely needs internet access, prefer a separate egress broker that performs domain/IP policy checks instead of enabling unrestricted networking inside the model container.
 
 ## Production deployment rules
 
 1. **Sandbox the model.** A Python wrapper is not a kernel security boundary.
-2. **Default to no network.** If web access is needed, broker it through an allowlisted egress service.
-3. **Do not mount secrets.** Never give the model your home directory, SSH keys, cloud credentials, `.env` files, Docker socket, or unrestricted device access.
+2. **Default to no network.** Broker required web access through a narrow egress layer.
+3. **Do not mount secrets.** Never give the model SSH keys, cloud credentials, `.env` files, Docker socket or an unrestricted home directory.
 4. **Keep policy and kill switch outside the model sandbox.** Make policy read-only to the model.
-5. **Use least privilege.** Expose typed tools instead of arbitrary shell commands whenever possible.
+5. **Use least privilege.** Prefer typed tools with fixed schemas over arbitrary shell commands.
 6. **Limit resources.** CPU, RAM, disk, PIDs, request size, concurrency, retries and tool-chain depth should all be bounded.
-7. **Log security events.** Keep audit logs outside model-writable storage and protect them from tampering.
-8. **Test adversarially.** Add regression tests whenever a new tool, model, prompt, memory system or policy is introduced.
+7. **Protect audit logs.** Keep them outside model-writable storage and ship them to protected storage for important deployments.
+8. **Test adversarially.** Add regression tests whenever a new tool, model, memory system or prompt pathway is introduced.
 9. **Separate approval from execution.** High-impact actions should require an independent policy/approval layer.
 10. **Have an incident procedure.** Know how to stop the model, revoke credentials, isolate networking, preserve evidence and recover.
 
@@ -271,9 +270,15 @@ Then clients use `/v1/proxy`. They cannot provide an arbitrary destination URL, 
 
 See [`THREAT_MODEL.md`](THREAT_MODEL.md) for threats, controls, residual risks and incident response.
 
+For security vulnerabilities, see [`SECURITY.md`](SECURITY.md).
+
 ## Why this architecture?
 
-Modern agent security guidance emphasizes least privilege, sandboxing, restricted network egress, resource limits, monitoring, circuit breakers and independent approval for high-impact actions. AI Security is designed around those principles rather than relying on a prompt saying "don't do anything dangerous."
+AI Security is built around least privilege, runtime isolation, restricted network egress, resource limits, monitoring, circuit breakers and independent approval rather than trusting a prompt to constrain a model. GitHub's CI guidance also recommends explicit Python setup and project dependency installation for reproducible testing. citeturn0search0
+
+## Current status
+
+**Release line: 1.1.x development.** The repository contains the core Airlock, containment, monitor, Shield and Docker-sandbox components. Treat the project as security-sensitive software: review the threat model and validate the exact deployment environment before using it to protect valuable systems.
 
 ## Roadmap
 
@@ -282,7 +287,7 @@ Modern agent security guidance emphasizes least privilege, sandboxing, restricte
 - typed capability manifests
 - Linux seccomp/AppArmor adapters
 - Windows Job Objects/AppContainer adapter
-- stronger DNS rebinding/SSRF controls through an external egress broker
+- dedicated DNS-pinned egress broker
 - tamper-evident remote audit storage
 - desktop tray dashboard + operator Kill AI button
 - multi-agent identity and capability delegation
