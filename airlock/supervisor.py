@@ -3,12 +3,10 @@ from __future__ import annotations
 import os
 import subprocess
 import threading
-import time
 from pathlib import Path
 
 from .audit import AuditLog
 from .containment import ContainmentController
-from .kill_switch import KillSwitch
 
 
 class AISupervisor:
@@ -22,19 +20,24 @@ class AISupervisor:
 
     @staticmethod
     def _safe_env(extra: dict[str, str] | None = None) -> dict[str, str]:
-        allowed = {
-            "PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "TMPDIR",
-            "LANG", "LC_ALL", "PYTHONPATH", "PYTHONHOME",
-        }
+        allowed = {"SYSTEMROOT", "WINDIR", "TEMP", "TMP", "TMPDIR", "LANG", "LC_ALL"}
         env = {k: v for k, v in os.environ.items() if k in allowed}
         if extra:
-            env.update(extra)
+            for key, value in extra.items():
+                if not key or "=" in key or "\x00" in key or "\x00" in value:
+                    raise ValueError("invalid environment variable")
+                env[key] = value
         return env
 
     def start(self, argv: list[str], cwd: str | Path | None = None,
               env: dict[str, str] | None = None) -> int:
-        if not argv or any(not isinstance(x, str) or not x for x in argv):
-            raise ValueError("argv must be a non-empty list of strings")
+        if not argv or any(not isinstance(x, str) or not x or "\x00" in x for x in argv):
+            raise ValueError("argv must be a non-empty list of safe strings")
+        executable = Path(argv[0])
+        if not executable.is_absolute():
+            raise ValueError("the supervised executable must be an absolute path")
+        if not executable.is_file():
+            raise FileNotFoundError(str(executable))
         with self._lock:
             if self.process and self.process.poll() is None:
                 raise RuntimeError("an AI process is already running")
@@ -51,8 +54,8 @@ class AISupervisor:
             if os.name != "nt":
                 kwargs["start_new_session"] = True
             self.process = subprocess.Popen(**kwargs)  # type: ignore[arg-type]
-            self.containment.register_pid(self.process.pid, argv[0])
-            self.audit.event("ai_start", True, "AI process started", pid=self.process.pid, executable=argv[0])
+            self.containment.register_pid(self.process.pid, executable.name)
+            self.audit.event("ai_start", True, "AI process started", pid=self.process.pid, executable=str(executable))
             return self.process.pid
 
     def wait(self, timeout: float | None = None) -> int:
@@ -63,12 +66,13 @@ class AISupervisor:
         return process.wait(timeout=timeout)
 
     def output(self, max_bytes: int = 1_000_000) -> str:
+        if max_bytes <= 0:
+            raise ValueError("max_bytes must be positive")
         with self._lock:
             process = self.process
         if process is None or process.stdout is None:
             return ""
-        data = process.stdout.read(max_bytes)
-        return data
+        return process.stdout.read(max_bytes)
 
     def stop(self, reason: str = "operator stop") -> None:
         with self._lock:
