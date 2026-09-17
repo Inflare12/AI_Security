@@ -1,11 +1,11 @@
-from pathlib import Path
 import sys
+from pathlib import Path
 
 from airlock import AuditLog
-from airlock.integrity import sha256_file, verify_file, verify_policy_file
-from airlock.supervisor import AISupervisor
 from airlock.containment import ContainmentController
+from airlock.integrity import sha256_file, verify_file, verify_policy_file
 from airlock.kill_switch import KillSwitch
+from airlock.supervisor import AISupervisor
 
 
 def test_file_integrity(tmp_path: Path):
