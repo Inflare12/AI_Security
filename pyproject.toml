@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-security-airlock"
+version = "1.0.0"
+description = "Local-first capability control, containment and API shielding for AI runtimes"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+shield = ["fastapi>=0.115,<1", "uvicorn[standard]>=0.30,<1"]
+test = ["pytest>=8,<9"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
