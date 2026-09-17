@@ -5,7 +5,6 @@ import signal
 import subprocess
 import sys
 import threading
-from pathlib import Path
 
 from .audit import AuditLog
 from .kill_switch import KillSwitch
@@ -14,17 +13,12 @@ from .kill_switch import KillSwitch
 class ContainmentController:
     """Emergency containment for model/agent processes.
 
-    The controller is operator/security-monitor driven. A model cannot call this
-    object unless the host application explicitly exposes it as a privileged tool.
-    Host shutdown is disabled by default and requires explicit opt-in.
+    This controller is intended for an operator or security monitor, not as a
+    normal model tool. Host shutdown is disabled unless explicitly enabled.
     """
 
-    def __init__(
-        self,
-        kill_switch: KillSwitch | None = None,
-        audit: AuditLog | None = None,
-        allow_host_shutdown: bool = False,
-    ) -> None:
+    def __init__(self, kill_switch: KillSwitch | None = None,
+                 audit: AuditLog | None = None, allow_host_shutdown: bool = False) -> None:
         self.kill_switch = kill_switch or KillSwitch()
         self.audit = audit or AuditLog()
         self.allow_host_shutdown = allow_host_shutdown
@@ -55,21 +49,20 @@ class ContainmentController:
             if os.name == "nt":
                 result = subprocess.run(
                     ["taskkill", "/PID", str(pid), "/T", "/F"],
-                    capture_output=True,
-                    text=True,
-                    timeout=10,
-                    check=False,
+                    capture_output=True, text=True, timeout=10, check=False,
                 )
                 ok = result.returncode == 0
             else:
-                os.killpg(pid, signal.SIGKILL)
+                # Only kill a process group when the target owns its own group.
+                # This avoids accidentally killing the operator's shell/process group.
+                pgid = os.getpgid(pid)
+                if pgid == pid:
+                    os.killpg(pgid, signal.SIGKILL)
+                else:
+                    os.kill(pid, signal.SIGKILL)
                 ok = True
         except (ProcessLookupError, PermissionError, OSError):
-            try:
-                os.kill(pid, signal.SIGKILL)
-                ok = True
-            except (ProcessLookupError, PermissionError, OSError):
-                ok = False
+            ok = False
         self.audit.event("terminate_process", ok, "process termination", pid=pid)
         return ok
 
