@@ -18,12 +18,12 @@ if os.name == "nt":
 
 
 class WindowsJob:
-    """Small Win32 Job Object wrapper for supervising a Windows process tree."""
+    """Win32 Job Object wrapper for supervising one Windows process tree."""
 
-    def __init__(self, name: str = "AI-Security-Airlock") -> None:
+    def __init__(self, name: str | None = None) -> None:
         if os.name != "nt":
             raise OSError("WindowsJob is only available on Windows")
-        if not name or "\x00" in name:
+        if name is not None and (not name or "\x00" in name):
             raise ValueError("invalid job name")
         self.handle = kernel32.CreateJobObjectW(None, name)
         if not self.handle:
