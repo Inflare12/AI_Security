@@ -127,7 +127,7 @@ class Airlock:
         self.audit.event("command", True, reason, command=command)
         result = subprocess.run(
             parts, capture_output=True, text=True,
-            timeout=self.policy.limits.max_command_seconds, shell=False,
+            timeout=self.policy.limits.max_command_seconds, shell=False, check=False,
         )
         output = (result.stdout + result.stderr)[: self.policy.limits.max_output_bytes]
         return redact_secrets(output)
