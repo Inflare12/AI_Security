@@ -3,6 +3,7 @@ from __future__ import annotations
 import subprocess
 from urllib.request import Request, urlopen
 from .audit import AuditLog
+from .kill_switch import KillSwitch
 from .policy import Policy, redact_secrets
 
 
@@ -11,11 +12,18 @@ class SecurityViolation(PermissionError):
 
 
 class Airlock:
-    def __init__(self, policy: Policy, audit: AuditLog | None = None):
+    def __init__(self, policy: Policy, audit: AuditLog | None = None, kill_switch: KillSwitch | None = None):
         self.policy = policy
         self.audit = audit or AuditLog()
+        self.kill_switch = kill_switch or KillSwitch()
+
+    def _check_alive(self) -> None:
+        if self.kill_switch.engaged:
+            self.audit.event("kill_switch", False, "emergency kill switch engaged")
+            raise SecurityViolation("AI Security emergency stop is engaged")
 
     def request_url(self, url: str, timeout: float = 10) -> bytes:
+        self._check_alive()
         ok, reason = self.policy.check_url(url)
         self.audit.event("network", ok, reason, url=url)
         if not ok:
@@ -28,6 +36,7 @@ class Airlock:
         return data
 
     def read_file(self, path: str) -> str:
+        self._check_alive()
         ok, reason = self.policy.check_file(path, write=False)
         self.audit.event("file_read", ok, reason, path=path)
         if not ok:
@@ -36,6 +45,7 @@ class Airlock:
             return f.read(self.policy.limits.max_output_bytes)
 
     def write_file(self, path: str, content: str) -> None:
+        self._check_alive()
         ok, reason = self.policy.check_file(path, write=True)
         self.audit.event("file_write", ok, reason, path=path)
         if not ok:
@@ -46,11 +56,11 @@ class Airlock:
             f.write(redact_secrets(content))
 
     def run_command(self, command: str) -> str:
+        self._check_alive()
         ok, reason = self.policy.check_command(command)
         self.audit.event("command", ok, reason, command=command)
         if not ok:
             raise SecurityViolation(reason)
-        # Never invoke a shell. This makes command chaining/redirection unavailable.
         result = subprocess.run(command.split(), capture_output=True, text=True, timeout=10, shell=False)
         output = (result.stdout + result.stderr)[: self.policy.limits.max_output_bytes]
         return redact_secrets(output)
