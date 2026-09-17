@@ -134,7 +134,7 @@ python -m airlock.demo
 pytest -q
 ```
 
-The GitHub Actions workflow tests Python 3.10–3.13, installs the package itself, compiles the security modules and produces coverage artifacts. GitHub recommends explicitly setting up the Python version and installing project dependencies in CI. citeturn0search0
+The GitHub Actions workflow tests Python 3.10–3.13, installs the package itself, compiles the security modules and produces coverage artifacts.
 
 ## Using Airlock
 
@@ -271,10 +271,6 @@ If the model genuinely needs internet access, prefer a separate egress broker th
 See [`THREAT_MODEL.md`](THREAT_MODEL.md) for threats, controls, residual risks and incident response.
 
 For security vulnerabilities, see [`SECURITY.md`](SECURITY.md).
-
-## Why this architecture?
-
-AI Security is built around least privilege, runtime isolation, restricted network egress, resource limits, monitoring, circuit breakers and independent approval rather than trusting a prompt to constrain a model. GitHub's CI guidance also recommends explicit Python setup and project dependency installation for reproducible testing. citeturn0search0
 
 ## Current status
 
