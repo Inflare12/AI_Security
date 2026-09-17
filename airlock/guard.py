@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ipaddress
+import os
 import shlex
 import socket
 import subprocess
@@ -118,7 +119,7 @@ class Airlock:
         if not ok:
             return self._deny("command", reason, command=command)
         try:
-            parts = shlex.split(command, posix=(__import__("os").name != "nt"))
+            parts = shlex.split(command, posix=(os.name != "nt"))
         except ValueError:
             return self._deny("command", "invalid command quoting", command=command)
         if len(parts) != 1:
