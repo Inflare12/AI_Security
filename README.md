@@ -2,167 +2,218 @@
 
 A defensive, local-first security layer for people running their own AI models and agents.
 
-**Core idea:** never rely on the model to keep itself safe. Put a security boundary around it: deny capabilities by default, isolate the runtime, monitor behavior, and keep an independent emergency containment path.
+**Core principle:** never rely on an AI model to keep itself safe. Put a security boundary around the runtime: deny capabilities by default, isolate the process, monitor violations, preserve evidence, and keep an operator-controlled emergency containment path outside the model.
 
-> **Important:** this is a security control layer, not a guarantee of perfect safety. For production, run untrusted AI inside a hardened container/VM and keep security policy, credentials and the kill switch outside anything the model can write.
+> **Security note:** this project is a defense-in-depth control layer, not a guarantee of perfect security. For untrusted models, use a hardened container or VM, remove host secrets, keep policy and emergency controls outside the model-writable filesystem, and validate the exact deployment environment.
 
-## What is included
+## Components
 
-### Airlock — capability firewall
+### Airlock
 
 - network disabled by default
 - exact HTTPS host allowlist
-- private/reserved IP checks and DNS destination checks
-- no ambient HTTP proxy use and no redirects in brokered requests
-- filesystem read/write allowlists with path containment
-- executable allowlist with shell-metacharacter rejection
-- tool-call, command, network and file limits
-- secret redaction in logs and brokered writes
-- structured JSONL audit trail
+- private/reserved/loopback destination checks
+- no ambient HTTP proxy and no redirects
+- filesystem read/write allowlists with resolved-path containment
+- shell metacharacter rejection
+- free-form command arguments disabled by default
+- tool-call and resource limits
+- secret redaction
 - fail-closed kill switch
+- audit events for allowed and denied operations
 
-### Runtime Monitor — circuit breaker
+### Runtime Monitor
 
-Repeated policy violations can automatically trip the security boundary. The default example is **8 violations in 60 seconds**. When tripped, the monitor engages the kill switch and the containment controller terminates registered AI processes.
+A policy-violation circuit breaker. A configurable number of violations inside a rolling time window engages containment without asking the model for permission.
 
-### Containment Controller — emergency stop
+### Containment Controller
 
-- engage kill switch
-- terminate registered model/agent process trees
-- preserve an audit trail
-- optional full host OS shutdown
+- operator/security-monitor emergency stop
+- registered AI process tracking
+- process-tree termination on Windows
+- process-group termination on Unix-like systems
+- optional host shutdown, disabled by default
+- audit records for containment actions
 
-**Host shutdown is disabled by default** and must be explicitly enabled by an operator. It is a last-resort incident response action, never a normal AI capability.
+The model is not given the containment controller as a normal capability.
 
-### Shield — API defense gateway
+### AI Supervisor
 
-- optional API-key authentication
-- per-client IP rate limiting without trusting spoofable client identity headers
-- request and response-size limits
+`AISupervisor` launches an operator-selected AI executable with:
+
+- `shell=False`
+- absolute executable path requirement
+- minimal inherited environment
+- stdin disabled
+- stdout/stderr capture
+- process registration with the containment controller
+- Unix process-group isolation
+
+This is the preferred launch path when the AI must be supervised by Airlock.
+
+### Watchdog
+
+`airlock.watchdog` is a separate monitoring process that watches an AI PID and an operator-controlled heartbeat file. If the heartbeat expires, it engages containment. The watchdog never receives model output as an authorization signal.
+
+### Policy Integrity
+
+`airlock.integrity` provides SHA-256 file verification so deployments can pin a policy file to an expected digest before startup.
+
+### Audit Log
+
+The JSONL audit log is append-only from the application's perspective and uses a hash chain. `AuditLog.verify()` detects modification or deletion/reordering of existing events.
+
+For important deployments, copy audit events to protected remote storage as well.
+
+### Shield
+
+An API defense gateway with:
+
+- optional constant-time API-key authentication
+- per-client rate limiting based on the actual connection address
+- request and response size limits
 - suspicious-request indicators
 - fixed operator-configured HTTPS upstream
 - no client-controlled destination
-- no redirects or ambient HTTP proxy use
+- no redirects or ambient proxy
 - response secret redaction
-- health endpoint
 
-Shield is an API boundary, not a universal firewall for the internet.
+Shield is **not** a universal internet firewall. Its suspicious-request detector is heuristic and should be treated as an abuse signal, not as semantic AI security.
 
-### Sandbox
+### Docker sandbox
 
-The included Docker configuration demonstrates a strong default runtime boundary:
+The included example uses:
 
 - `network_mode: none`
 - dropped Linux capabilities
 - `no-new-privileges`
 - read-only root filesystem
-- limited memory/CPU/process count
-- only required directories mounted
+- CPU, memory and PID limits
+- only required mounts
 
-For high-sensitivity deployments, use a hardened container runtime or VM in addition to Airlock.
+For higher-risk workloads, add a hardened container runtime or VM and host-level policy controls.
 
 ## Architecture
 
 ```text
-                         UNTRUSTED AI / AGENT
-                                  |
-                                  | tool request
-                                  v
-                    +---------------------------+
-                    |         AIRLOCK            |
-                    | deny-by-default policy     |
-                    | files / network / command  |
-                    | limits + secret redaction |
-                    +-------------+-------------+
-                                  |
-                         approved capability
-                                  v
-                    +---------------------------+
-                    |   SANDBOX / TOOL BROKER    |
-                    | no host secrets            |
-                    | restricted filesystem      |
-                    | restricted network        |
-                    +-------------+-------------+
-                                  |
-                                  v
-                        allowed resource/tool
+                    UNTRUSTED AI / AGENT
+                              |
+                              v
+                 +--------------------------+
+                 |         AIRLOCK          |
+                 | policy + capability     |
+                 | limits + secret filter  |
+                 +------------+-------------+
+                              |
+                    approved capability
+                              v
+                 +--------------------------+
+                 | SANDBOX / TOOL BROKER    |
+                 | restricted FS/network    |
+                 +------------+-------------+
+                              |
+                              v
+                         safe resource
 
-                    +---------------------------+
-                    |      RUNTIME MONITOR       |
-                    | violations / rate spikes  |
-                    | circuit breaker            |
-                    +-------------+-------------+
-                                  |
-                            threshold hit
-                                  v
-                    +---------------------------+
-                    |      CONTAINMENT           |
-                    | kill switch + process stop |
-                    | optional host shutdown     |
-                    +---------------------------+
+        +-------------------+-------------------+
+        |                   |                   |
+        v                   v                   v
+   Audit Log          Runtime Monitor      AI Supervisor
+   hash chain         circuit breaker      process control
+        |                   |                   |
+        +-------------------+-------------------+
+                              |
+                              v
+                    +--------------------------+
+                    |       CONTAINMENT        |
+                    | kill switch + stop tree |
+                    +--------------------------+
+                              ^
+                              |
+                         independent
+                          watchdog
 
-PUBLIC API PATH
-
-Client --> Shield --> one fixed AI upstream
-            |
-            +--> auth / rate / size / abuse checks
+PUBLIC API:
+Client --> Shield --> one fixed operator-configured upstream
 ```
 
 ## Quick start
 
-### Install
-
 ```bash
 python -m venv .venv
-# Windows PowerShell
-.\\.venv\\Scripts\\Activate.ps1
-# Linux/macOS
-# source .venv/bin/activate
-
-pip install -e ".[shield,test]"
 ```
 
-### Run the demo
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+Linux/macOS:
+
+```bash
+source .venv/bin/activate
+```
+
+Install everything needed for local development and tests:
+
+```bash
+python -m pip install -e ".[shield,test]"
+```
+
+Run the demo:
 
 ```bash
 python -m airlock.demo
 ```
 
-### Run tests
+Run the test suite:
 
 ```bash
 pytest -q
 ```
 
-The GitHub Actions workflow tests Python 3.10–3.13, installs the package itself, compiles the security modules and produces coverage artifacts.
+Security checks used by CI:
 
-## Using Airlock
+```bash
+python -m pip check
+ruff check airlock shield tests
+pip-audit
+```
+
+## Policy
+
+Start from `policy.example.json`. Keep the real policy outside every model-writable directory.
+
+A minimal policy can disable every optional capability:
 
 ```python
 from airlock import Airlock, AuditLog, Policy
 
 policy = Policy.from_dict({
-    "network": {
-        "enabled": False,
-        "allowed_hosts": [],
-        "deny_private_ips": True,
-    },
-    "filesystem": {
-        "read": ["./workspace"],
-        "write": ["./workspace/output"],
-    },
+    "network": {"enabled": False, "allowed_hosts": [], "deny_private_ips": True},
+    "filesystem": {"read": ["./workspace"], "write": ["./workspace/output"]},
     "commands": {"allowed": []},
 })
 
 airlock = Airlock(policy, AuditLog("audit.jsonl"))
-text = airlock.read_file("./workspace/input.txt")
 ```
 
-Use `policy.example.json` as the starting point. Keep the policy outside model-writable directories.
+### Policy integrity
+
+After creating a policy, record its SHA-256 digest in the deployment configuration and verify it before starting the model:
+
+```python
+from airlock.integrity import verify_policy_file
+
+verify_policy_file("/secure/policy.json", EXPECTED_POLICY_SHA256)
+```
+
+If the expected digest is supplied and does not match, startup should be aborted by the deployment supervisor.
 
 ## Emergency stop
 
-The kill switch is a file that must be outside all model-writable directories.
+The kill-switch file must live outside all model-writable paths:
 
 ```python
 from airlock import KillSwitch
@@ -171,13 +222,11 @@ kill = KillSwitch("/secure/operator/AI_SECURITY_KILL")
 kill.engage("operator emergency stop")
 ```
 
-After investigation, an operator can explicitly release it:
+While engaged, Airlock refuses brokered actions. Releasing the switch is an operator action:
 
 ```python
 kill.release()
 ```
-
-While engaged, Airlock refuses brokered actions.
 
 ### Automatic containment
 
@@ -188,15 +237,44 @@ kill = KillSwitch("/secure/operator/AI_SECURITY_KILL")
 containment = ContainmentController(kill, AuditLog("audit.jsonl"))
 monitor = RuntimeMonitor(containment, violation_threshold=8, window_seconds=60)
 
-containment.register_pid(model_process.pid, name="my-model")
+containment.register_pid(model_pid, name="my-model")
 monitor.violation("attempted access outside policy")
 ```
 
-When the threshold is reached, containment engages automatically.
+When the threshold is reached, containment engages without model approval.
 
-## Optional host shutdown
+## Supervised AI launch
 
-Do **not** enable this unless your deployment has a tested emergency procedure.
+The supervisor requires an absolute executable path and strips most inherited environment variables:
+
+```python
+from airlock import AuditLog, AISupervisor, ContainmentController, KillSwitch
+
+kill = KillSwitch("/secure/operator/AI_SECURITY_KILL")
+containment = ContainmentController(kill, AuditLog("audit.jsonl"))
+supervisor = AISupervisor(containment)
+
+pid = supervisor.start(["/absolute/path/to/your/model-runner"])
+```
+
+For high-risk deployment, put the supervised process inside Docker/VM isolation as well. The supervisor is process control, not a replacement for a kernel boundary.
+
+## Watchdog
+
+Start the watchdog outside the AI process and outside its writable directory:
+
+```bash
+python -m airlock.watchdog \
+  --pid 12345 \
+  --heartbeat /secure/operator/ai.heartbeat \
+  --kill-switch /secure/operator/AI_SECURITY_KILL
+```
+
+The AI host application should update the heartbeat periodically. If it stops doing so, the watchdog engages containment.
+
+## Host shutdown
+
+Host shutdown is disabled by default and should only be used as a tested last-resort operator procedure:
 
 ```python
 containment = ContainmentController(
@@ -204,12 +282,10 @@ containment = ContainmentController(
     audit=AuditLog("audit.jsonl"),
     allow_host_shutdown=True,
 )
-
-# Operator/security monitor only:
 containment.shutdown_host("critical AI runtime incident")
 ```
 
-The shutdown method is intentionally not part of `Airlock` and should never be exposed as a normal model tool.
+This is never a normal model capability. Data is not intentionally deleted by the containment operation.
 
 ## Shield gateway
 
@@ -219,13 +295,13 @@ Start locally:
 uvicorn shield.gateway:app --host 127.0.0.1 --port 8787
 ```
 
-Health:
+Health endpoint:
 
 ```text
 GET http://127.0.0.1:8787/health
 ```
 
-Inspect a request:
+Request inspection:
 
 ```bash
 curl -X POST http://127.0.0.1:8787/inspect \
@@ -233,7 +309,7 @@ curl -X POST http://127.0.0.1:8787/inspect \
   -d '{"prompt":"hello"}'
 ```
 
-For a protected upstream, configure a **single fixed HTTPS destination**:
+For proxy mode, configure one fixed HTTPS upstream:
 
 ```text
 AI_SHIELD_UPSTREAM_URL=https://your-ai-api.example/v1/chat/completions
@@ -243,52 +319,47 @@ AI_SHIELD_MAX_REQUEST_BYTES=2000000
 AI_SHIELD_MAX_RESPONSE_BYTES=4000000
 ```
 
-Then clients use `/v1/proxy`. They cannot provide an arbitrary destination URL, so this endpoint is not an open proxy.
+Do not expose a development instance with `AI_SHIELD_API_KEY` unset to the public internet.
 
-If `AI_SHIELD_API_KEY` is unset, authentication is intentionally disabled for local development. Do not expose that configuration publicly.
+## Production deployment checklist
 
-## Sandbox deployment
+1. Sandbox the model in a hardened container or VM.
+2. Keep model networking disabled unless a narrowly scoped egress broker is required.
+3. Never mount cloud credentials, SSH keys, `.env` files, Docker sockets or an unrestricted home directory.
+4. Keep policy, kill switch, watchdog state and operator controls outside model-writable storage.
+5. Prefer typed capabilities over free-form shell access.
+6. Bound CPU, memory, disk, PIDs, request size, concurrency, retries and tool-call rate.
+7. Keep audit logs outside model-writable storage and ship important events to protected storage.
+8. Verify the policy digest before startup.
+9. Require independent approval for high-impact actions.
+10. Test the actual deployment, not only the Python library.
+11. Have a documented incident process for containment, credential revocation, network isolation, evidence preservation and recovery.
 
-Start from the included `sandbox/docker-compose.yml` and replace the placeholder model command with your runner. The model should not receive the Docker socket, host credentials, unrestricted filesystem mounts or a network interface.
+## Testing and CI
 
-If the model genuinely needs internet access, prefer a separate egress broker that performs domain/IP policy checks instead of enabling unrestricted networking inside the model container.
+CI tests Python 3.10–3.13 and performs:
 
-## Production deployment rules
+- package installation
+- dependency consistency checks
+- Python compilation
+- Ruff static checks
+- dependency vulnerability auditing with `pip-audit`
+- unit/security tests
+- coverage reporting
 
-1. **Sandbox the model.** A Python wrapper is not a kernel security boundary.
-2. **Default to no network.** Broker required web access through a narrow egress layer.
-3. **Do not mount secrets.** Never give the model SSH keys, cloud credentials, `.env` files, Docker socket or an unrestricted home directory.
-4. **Keep policy and kill switch outside the model sandbox.** Make policy read-only to the model.
-5. **Use least privilege.** Prefer typed tools with fixed schemas over arbitrary shell commands.
-6. **Limit resources.** CPU, RAM, disk, PIDs, request size, concurrency, retries and tool-chain depth should all be bounded.
-7. **Protect audit logs.** Keep them outside model-writable storage and ship them to protected storage for important deployments.
-8. **Test adversarially.** Add regression tests whenever a new tool, model, memory system or prompt pathway is introduced.
-9. **Separate approval from execution.** High-impact actions should require an independent policy/approval layer.
-10. **Have an incident procedure.** Know how to stop the model, revoke credentials, isolate networking, preserve evidence and recover.
+GitHub Actions is configured with read-only repository contents permissions. For stronger supply-chain controls, repository administrators should also require full-SHA pinning for third-party Actions and review workflow changes. GitHub recommends least-privilege workflow permissions and SHA pinning for Actions. citeturn0search0turn0search4
 
 ## Threat model
 
 See [`THREAT_MODEL.md`](THREAT_MODEL.md) for threats, controls, residual risks and incident response.
 
-For security vulnerabilities, see [`SECURITY.md`](SECURITY.md).
+See [`SECURITY.md`](SECURITY.md) for vulnerability reporting and deployment security requirements.
 
-## Current status
+## Status
 
-**Release line: 1.1.x development.** The repository contains the core Airlock, containment, monitor, Shield and Docker-sandbox components. Treat the project as security-sensitive software: review the threat model and validate the exact deployment environment before using it to protect valuable systems.
+**Version 1.1.1 development.** The repository contains the Airlock capability layer, runtime monitor, containment controller, supervised launcher, watchdog, policy integrity checks, tamper-evident audit log, Shield gateway, Docker sandbox and automated CI/security checks.
 
-## Roadmap
-
-- signed/versioned policy bundles
-- policy integrity verification
-- typed capability manifests
-- Linux seccomp/AppArmor adapters
-- Windows Job Objects/AppContainer adapter
-- dedicated DNS-pinned egress broker
-- tamper-evident remote audit storage
-- desktop tray dashboard + operator Kill AI button
-- multi-agent identity and capability delegation
-- approval tokens bound to exact high-impact actions
-- fleet-wide policy management
+Security is defense-in-depth. The remaining work for any real deployment is environment-specific validation, OS/container hardening, credential isolation and independent operational review.
 
 ## License
 
