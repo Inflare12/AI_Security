@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import ctypes
+import ctypes.wintypes as wintypes
 import os
-from ctypes import wintypes
 
 
 if os.name == "nt":
@@ -43,9 +43,3 @@ class WindowsJob:
         if getattr(self, "handle", None):
             kernel32.CloseHandle(self.handle)
             self.handle = None
-
-    def __enter__(self) -> "WindowsJob":
-        return self
-
-    def __exit__(self, exc_type, exc, tb) -> None:
-        self.close()
