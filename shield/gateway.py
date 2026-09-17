@@ -7,7 +7,9 @@ import socket
 import time
 import uuid
 from collections import defaultdict, deque
-from urllib.parse import HTTPRedirectHandler, ProxyHandler, Request as URLRequest, build_opener, urlparse
+from urllib.error import URLError
+from urllib.parse import urlparse
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request as URLRequest, build_opener
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
@@ -152,7 +154,7 @@ async def proxy(request: Request):
                 return JSONResponse({"error": "upstream response too large"}, status_code=502)
             status = upstream_response.status
             content_type = upstream_response.headers.get("content-type", "application/json")
-    except Exception as exc:
+    except (OSError, URLError) as exc:
         return JSONResponse({"error": "upstream request failed", "type": type(exc).__name__}, status_code=502)
 
     safe = redact_secrets(response_body.decode("utf-8", errors="replace"))
