@@ -273,7 +273,7 @@ See [`THREAT_MODEL.md`](THREAT_MODEL.md) for threats, controls, residual risks a
 
 ## Why this architecture?
 
-Modern agent security guidance emphasizes least privilege, sandboxing, restricted network egress, resource limits, monitoring, circuit breakers and human/independent approval for high-impact actions. AI Security is designed around those principles rather than relying on a prompt saying "don't do anything dangerous." citeturn0search1turn0search2turn0search24
+Modern agent security guidance emphasizes least privilege, sandboxing, restricted network egress, resource limits, monitoring, circuit breakers and independent approval for high-impact actions. AI Security is designed around those principles rather than relying on a prompt saying "don't do anything dangerous."
 
 ## Roadmap
 
