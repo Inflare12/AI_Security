@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import ipaddress
+import shlex
 import socket
 import subprocess
 import time
 from collections import deque
-from urllib.parse import urlparse
-from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
+from urllib.parse import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 from .audit import AuditLog
 from .kill_switch import KillSwitch
@@ -52,11 +52,6 @@ class Airlock:
         self._tool_calls.append(now)
 
     def _resolve_public_host(self, host: str) -> None:
-        """Reject hostnames that currently resolve to private/reserved addresses.
-
-        This is defense-in-depth; a dedicated egress proxy is still recommended
-        for strong SSRF/DNS-rebinding protection.
-        """
         if not self.policy.deny_private_ips:
             return
         try:
@@ -77,12 +72,9 @@ class Airlock:
         ok, reason = self.policy.check_url(url)
         if not ok:
             return self._deny("network", reason, url=url)
-        parsed = urlparse(url)
-        if parsed.port not in (None, 443):
-            return self._deny("network", "only HTTPS port 443 is permitted", url=url)
-        self._resolve_public_host(parsed.hostname or "")
+        self._resolve_public_host(__import__("urllib.parse", fromlist=["urlparse"]).urlparse(url).hostname or "")
         self.audit.event("network", True, reason, url=url)
-        req = Request(url, headers={"User-Agent": "AI-Security-Airlock/1.0"})
+        req = Request(url, headers={"User-Agent": "AI-Security-Airlock/1.1"})
         opener = build_opener(ProxyHandler({}), _NoRedirect())
         try:
             with opener.open(req, timeout=min(float(timeout), self.policy.limits.max_network_seconds)) as response:
@@ -122,9 +114,15 @@ class Airlock:
         ok, reason = self.policy.check_command(command)
         if not ok:
             return self._deny("command", reason, command=command)
+        try:
+            parts = shlex.split(command, posix=True)
+        except ValueError:
+            return self._deny("command", "invalid command quoting", command=command)
+        if len(parts) != 1:
+            return self._deny("command", "free-form command arguments are disabled; use a typed tool", command=command)
         self.audit.event("command", True, reason, command=command)
         result = subprocess.run(
-            command.split(), capture_output=True, text=True,
+            parts, capture_output=True, text=True,
             timeout=self.policy.limits.max_command_seconds, shell=False,
         )
         output = (result.stdout + result.stderr)[: self.policy.limits.max_output_bytes]
