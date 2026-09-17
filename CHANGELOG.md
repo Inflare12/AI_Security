@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.1.1
+
+- Added operator-owned AI supervisor with absolute executable paths, minimal environment inheritance and process registration.
+- Added independent heartbeat watchdog with cross-platform process detection.
+- Added SHA-256 policy/file integrity verification helpers.
+- Upgraded the audit log to a tamper-evident hash chain with verification support.
+- Disabled free-form command arguments in Airlock to reduce arbitrary-code execution risk.
+- Hardened Shield request-size handling and removed client identity from inspection responses.
+- Added Shield, integrity, supervisor and regression security tests.
+- Added `pip check`, Ruff and `pip-audit` gates to CI.
+- Added Dependabot configuration and CODEOWNERS for security-sensitive paths.
+- Updated documentation and version metadata.
+
 ## 1.1.0
 
 - Hardened Shield authentication and client rate limiting.
