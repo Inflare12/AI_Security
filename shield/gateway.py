@@ -9,7 +9,8 @@ import uuid
 from collections import defaultdict, deque
 from urllib.error import URLError
 from urllib.parse import urlparse
-from urllib.request import HTTPRedirectHandler, ProxyHandler, Request as URLRequest, build_opener
+from urllib.request import HTTPRedirectHandler, ProxyHandler, build_opener
+from urllib.request import Request as URLRequest
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
