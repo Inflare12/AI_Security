@@ -29,7 +29,7 @@ jobs:
       - name: Run Ruff checks
         run: ruff check airlock shield tests
       - name: Audit Python dependencies
-        run: pip-audit
+        run: pip-audit --skip-editable
       - name: Run tests with coverage
         run: pytest -q --cov=airlock --cov=shield --cov-report=term-missing --cov-report=xml
       - name: Upload coverage
