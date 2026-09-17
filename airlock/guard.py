@@ -6,7 +6,7 @@ import socket
 import subprocess
 import time
 from collections import deque
-from urllib.parse import HTTPRedirectHandler, ProxyHandler, Request, build_opener
+from urllib.parse import HTTPRedirectHandler, ProxyHandler, Request, build_opener, urlparse
 
 from .audit import AuditLog
 from .kill_switch import KillSwitch
@@ -72,7 +72,10 @@ class Airlock:
         ok, reason = self.policy.check_url(url)
         if not ok:
             return self._deny("network", reason, url=url)
-        self._resolve_public_host(__import__("urllib.parse", fromlist=["urlparse"]).urlparse(url).hostname or "")
+        parsed = urlparse(url)
+        if parsed.port not in (None, 443):
+            return self._deny("network", "only HTTPS port 443 is permitted", url=url)
+        self._resolve_public_host(parsed.hostname or "")
         self.audit.event("network", True, reason, url=url)
         req = Request(url, headers={"User-Agent": "AI-Security-Airlock/1.1"})
         opener = build_opener(ProxyHandler({}), _NoRedirect())
@@ -115,7 +118,7 @@ class Airlock:
         if not ok:
             return self._deny("command", reason, command=command)
         try:
-            parts = shlex.split(command, posix=True)
+            parts = shlex.split(command, posix=(__import__("os").name != "nt"))
         except ValueError:
             return self._deny("command", "invalid command quoting", command=command)
         if len(parts) != 1:
