@@ -7,7 +7,13 @@ import socket
 import subprocess
 import time
 from collections import deque
-from urllib.parse import HTTPRedirectHandler, ProxyHandler, Request, build_opener, urlparse
+from urllib.parse import (
+    HTTPRedirectHandler,
+    ProxyHandler,
+    Request,
+    build_opener,
+    urlparse,
+)
 
 from .audit import AuditLog
 from .kill_switch import KillSwitch
