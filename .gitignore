@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.env.*
+airlock-audit.jsonl
+AI_SECURITY_KILL
+workspace/output/*
+!.gitkeep
