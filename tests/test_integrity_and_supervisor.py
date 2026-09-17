@@ -1,4 +1,5 @@
 from pathlib import Path
+import sys
 
 from airlock import AuditLog
 from airlock.integrity import sha256_file, verify_file, verify_policy_file
@@ -34,7 +35,7 @@ def test_supervisor_strips_unapproved_environment(tmp_path: Path):
     audit = AuditLog(str(tmp_path / "audit.jsonl"))
     containment = ContainmentController(ks, audit)
     supervisor = AISupervisor(containment, audit)
-    pid = supervisor.start(["python", "-c", "print('ok')"], cwd=tmp_path,
+    pid = supervisor.start([sys.executable, "-c", "print('ok')"], cwd=tmp_path,
                            env={"AI_TEST_VALUE": "not-inherited"})
     code = supervisor.wait(timeout=10)
     assert code == 0
