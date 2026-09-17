@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import ctypes
-import ctypes.wintypes as wintypes
 import os
+from ctypes import wintypes
 
 
 if os.name == "nt":
