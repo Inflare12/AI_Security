@@ -41,3 +41,14 @@ def test_supervisor_strips_unapproved_environment(tmp_path: Path):
     assert code == 0
     supervisor.reap()
     assert pid > 0
+
+
+def test_supervisor_emergency_stop_terminates_process_tree(tmp_path: Path):
+    ks = KillSwitch(str(tmp_path / "KILL"))
+    audit = AuditLog(str(tmp_path / "audit.jsonl"))
+    containment = ContainmentController(ks, audit)
+    supervisor = AISupervisor(containment, audit)
+    supervisor.start([sys.executable, "-c", "import time; time.sleep(30)"], cwd=tmp_path)
+    supervisor.stop("test emergency stop")
+    assert supervisor.wait(timeout=10) != 0
+    supervisor.reap()
