@@ -7,12 +7,12 @@ import socket
 import subprocess
 import time
 from collections import deque
-from urllib.parse import (
+from urllib.parse import urlparse
+from urllib.request import (
     HTTPRedirectHandler,
     ProxyHandler,
     Request,
     build_opener,
-    urlparse,
 )
 
 from .audit import AuditLog
