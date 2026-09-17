@@ -59,7 +59,7 @@ class AISupervisor:
             try:
                 self.process = subprocess.Popen(**kwargs)  # type: ignore[arg-type]
                 if job is not None:
-                    job.assign(self.process._handle)
+                    job.assign(int(self.process._handle))
                 self._job = job
             except Exception:
                 if job is not None:
