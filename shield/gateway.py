@@ -7,15 +7,14 @@ import socket
 import time
 import uuid
 from collections import defaultdict, deque
-from urllib.parse import urlparse
-from urllib.request import HTTPRedirectHandler, ProxyHandler, Request as URLRequest, build_opener
+from urllib.parse import HTTPRedirectHandler, ProxyHandler, Request as URLRequest, build_opener, urlparse
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 
 from airlock.policy import redact_secrets
 
-app = FastAPI(title="AI Security Shield", version="1.1.0")
+app = FastAPI(title="AI Security Shield", version="1.1.1")
 WINDOW = 60.0
 MAX_REQUEST_BYTES = int(os.getenv("AI_SHIELD_MAX_REQUEST_BYTES", "2000000"))
 MAX_RESPONSE_BYTES = int(os.getenv("AI_SHIELD_MAX_RESPONSE_BYTES", "4000000"))
@@ -36,7 +35,6 @@ class _NoRedirect(HTTPRedirectHandler):
 
 
 def client_id(request: Request) -> str:
-    # Never trust a client-supplied identity header for rate limiting.
     return request.client.host if request.client else "unknown"
 
 
@@ -96,6 +94,13 @@ def common_checks(request: Request, body: bytes) -> tuple[str, JSONResponse | No
         return identity, JSONResponse({"allowed": False, "error": "unauthorized"}, status_code=401)
     if not rate_allowed(identity):
         return identity, JSONResponse({"allowed": False, "error": "rate limit exceeded"}, status_code=429)
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > MAX_REQUEST_BYTES:
+                return identity, JSONResponse({"allowed": False, "error": "request too large"}, status_code=413)
+        except ValueError:
+            return identity, JSONResponse({"allowed": False, "error": "invalid content length"}, status_code=400)
     if len(body) > MAX_REQUEST_BYTES:
         return identity, JSONResponse({"allowed": False, "error": "request too large"}, status_code=413)
     return identity, None
@@ -109,7 +114,7 @@ def health():
 @app.post("/inspect")
 async def inspect(request: Request):
     body = await request.body()
-    identity, error = common_checks(request, body)
+    _, error = common_checks(request, body)
     if error:
         return error
     signals = inspect_bytes(body)
@@ -118,20 +123,13 @@ async def inspect(request: Request):
         "signals": signals,
         "bytes": len(body),
         "request_id": str(uuid.uuid4()),
-        "identity": identity,
     }
 
 
 @app.post("/v1/proxy")
 async def proxy(request: Request):
-    """Proxy to one fixed, operator-configured HTTPS upstream.
-
-    No client-controlled destination, redirects, or ambient HTTP proxy settings are
-    honored. This endpoint is therefore not an open proxy, though a dedicated
-    egress proxy is still recommended for high-sensitivity deployments.
-    """
     body = await request.body()
-    identity, error = common_checks(request, body)
+    _, error = common_checks(request, body)
     if error:
         return error
     if not _upstream_is_valid() or not _upstream_public():
@@ -143,7 +141,7 @@ async def proxy(request: Request):
 
     headers = {
         "Content-Type": request.headers.get("content-type", "application/json"),
-        "User-Agent": "AI-Security-Shield/1.1",
+        "User-Agent": "AI-Security-Shield/1.1.1",
     }
     req = URLRequest(UPSTREAM, data=body, headers=headers, method="POST")
     opener = build_opener(ProxyHandler({}), _NoRedirect())
