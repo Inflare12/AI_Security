@@ -31,6 +31,12 @@ def test_shell_chaining_denied(tmp_path):
         airlock.run_command("python -c x ; whoami")
 
 
+def test_free_form_command_arguments_denied(tmp_path):
+    airlock = Airlock(policy(tmp_path), AuditLog(str(tmp_path / "audit.jsonl")))
+    with pytest.raises(SecurityViolation):
+        airlock.run_command("python -c print('unsafe')")
+
+
 def test_secret_redaction(tmp_path):
     out = tmp_path / "out"
     out.mkdir()
