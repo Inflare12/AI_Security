@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .audit import AuditLog
 from .containment import ContainmentController
+from .windows_job import WindowsJob
 
 
 class AISupervisor:
@@ -16,6 +17,7 @@ class AISupervisor:
         self.containment = containment
         self.audit = audit or containment.audit
         self.process: subprocess.Popen[str] | None = None
+        self._job: WindowsJob | None = None
         self._lock = threading.Lock()
 
     @staticmethod
@@ -41,6 +43,7 @@ class AISupervisor:
         with self._lock:
             if self.process and self.process.poll() is None:
                 raise RuntimeError("an AI process is already running")
+            job = WindowsJob() if os.name == "nt" else None
             kwargs: dict[str, object] = {
                 "args": argv,
                 "cwd": str(cwd) if cwd else None,
@@ -53,7 +56,19 @@ class AISupervisor:
             }
             if os.name != "nt":
                 kwargs["start_new_session"] = True
-            self.process = subprocess.Popen(**kwargs)  # type: ignore[arg-type]
+            try:
+                self.process = subprocess.Popen(**kwargs)  # type: ignore[arg-type]
+                if job is not None:
+                    job.assign(self.process._handle)
+                self._job = job
+            except Exception:
+                if job is not None:
+                    job.close()
+                if self.process is not None and self.process.poll() is None:
+                    self.process.kill()
+                    self.process.wait()
+                self.process = None
+                raise
             self.containment.register_pid(self.process.pid, executable.name)
             self.audit.event("ai_start", True, "AI process started", pid=self.process.pid, executable=str(executable))
             return self.process.pid
@@ -77,18 +92,28 @@ class AISupervisor:
     def stop(self, reason: str = "operator stop") -> None:
         with self._lock:
             process = self.process
+            job = self._job
         if process is None or process.poll() is not None:
             return
-        self.containment.engage(reason)
+        if job is not None:
+            job.terminate(1)
+        else:
+            self.containment.engage(reason)
+        self.audit.event("ai_stop", True, reason, pid=process.pid)
 
     def reap(self) -> int | None:
         with self._lock:
             process = self.process
+            job = self._job
         if process is None:
             return None
         code = process.poll()
         if code is not None:
             self.containment.unregister_pid(process.pid)
+            if job is not None:
+                job.close()
+                with self._lock:
+                    self._job = None
             self.audit.event("ai_exit", True, "AI process exited", pid=process.pid, returncode=code)
         return code
 
