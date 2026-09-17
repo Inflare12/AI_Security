@@ -347,7 +347,7 @@ CI tests Python 3.10–3.13 and performs:
 - unit/security tests
 - coverage reporting
 
-GitHub Actions is configured with read-only repository contents permissions. For stronger supply-chain controls, repository administrators should also require full-SHA pinning for third-party Actions and review workflow changes. GitHub recommends least-privilege workflow permissions and SHA pinning for Actions. citeturn0search0turn0search4
+GitHub Actions is configured with read-only repository contents permissions. For stronger supply-chain controls, repository administrators should also require full-SHA pinning for third-party Actions and review workflow changes.
 
 ## Threat model
 
