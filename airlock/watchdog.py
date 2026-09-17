@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import subprocess
 import time
 from pathlib import Path
 
@@ -17,6 +18,24 @@ def heartbeat_is_fresh(path: Path, timeout: float) -> bool:
         return False
 
 
+def process_exists(pid: int) -> bool:
+    if os.name == "nt":
+        result = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+            capture_output=True, text=True, timeout=5, check=False,
+        )
+        return result.returncode == 0 and str(pid) in result.stdout
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
 def watch(pid: int, heartbeat: str, kill_path: str, timeout: float = 15.0,
           interval: float = 2.0, audit_path: str = "airlock-audit.jsonl") -> int:
     if pid <= 0 or timeout <= 0 or interval <= 0:
@@ -28,13 +47,11 @@ def watch(pid: int, heartbeat: str, kill_path: str, timeout: float = 15.0,
     hb = Path(heartbeat)
     audit.event("watchdog_start", True, "watchdog started", pid=pid)
     while not kill_switch.engaged:
+        if not process_exists(pid):
+            return 0
         if not heartbeat_is_fresh(hb, timeout):
             containment.engage("watchdog heartbeat expired")
             return 2
-        try:
-            os.kill(pid, 0)
-        except (ProcessLookupError, PermissionError, OSError):
-            return 0
         time.sleep(interval)
     return 0
 
